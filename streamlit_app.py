@@ -20,7 +20,7 @@ eastern = pytz.timezone('US/Eastern')
 
 # Streamlit Setup
 st.set_page_config(page_title="Trading Dashboard", page_icon="📈", layout="wide")
-st.title("Automated Trading Dashboard")
+st.title("📈 Automated Trading Dashboard")
 
 # Trading Strategy Class
 class MonthlyProfitOptimizationStrategy(bt.Strategy):
@@ -112,11 +112,11 @@ def run_live_trading(stock_list):
                     cerebro.adddata(data_feed)
                     cerebro.run()
             portfolio = get_portfolio()
-            st.subheader("Portfolio Summary")
-            st.write(f"Cash: ${portfolio['cash']:.2f}")
-            st.write(f"Equity: ${portfolio['equity']:.2f}")
-            st.write(f"Profit/Loss: ${portfolio['profit_loss']:.2f}")
-            st.subheader("Open Positions")
+            st.subheader("📊 Portfolio Summary")
+            st.write(f"**Cash:** ${portfolio['cash']:.2f}")
+            st.write(f"**Equity:** ${portfolio['equity']:.2f}")
+            st.write(f"**Profit/Loss:** ${portfolio['profit_loss']:.2f}")
+            st.subheader("🛍️ Open Positions")
             if portfolio["positions"]:
                 st.dataframe(pd.DataFrame(portfolio["positions"]))
             else:
@@ -127,31 +127,25 @@ def run_live_trading(stock_list):
             time.sleep(60 * 60)
 
 # Sidebar and UI Setup
-st.sidebar.header("Trading Controls")
-trading_enabled = st.sidebar.toggle("Enable Trading", value=True)
+st.sidebar.header("⚙️ Trading Controls")
+trading_enabled = st.sidebar.checkbox("Enable Trading", value=True)
 risk_percentage = st.sidebar.slider("Risk Per Trade (%)", 0.1, 5.0, 2.0)
-selected_symbol = st.selectbox("Select Symbol", ['AAPL', 'MSFT', 'GOOG', 'AMZN', 'META', 'TSLA', 'NVDA', 'BA', 'DIS', 'NFLX'])
+
+st.sidebar.header("📈 Select Stock")
+selected_symbol = st.sidebar.selectbox("Select Symbol", 
+                                       ['AAPL', 'MSFT', 'GOOG', 'AMZN', 'META', 'TSLA', 'NVDA', 'BA', 'DIS', 'NFLX'])
+
 if st.sidebar.button("Start Trading"):
     run_live_trading([selected_symbol])
-
-data = fetch_data(selected_symbol)
-if data is not None:
-    st.plotly_chart(create_candlestick_chart(data, selected_symbol), use_container_width=True)
-
-portfolio = get_portfolio()
-st.subheader("Account Summary")
-st.write(f"Buying Power: ${portfolio['cash']:.2f}")
-st.write(f"Portfolio Value: ${portfolio['equity']:.2f}")
-
 
 # Custom Styling
 st.markdown("""
     <style>
     body { background-color: #0e1117; color: white; font-family: 'Arial', sans-serif; }
     .stSidebar { background-color: #161b22; }
-    .css-1d391kg { padding: 20px; }
     .stButton>button { background-color: #238636; color: white; font-weight: bold; }
     .stTabs { font-size: 16px; }
+    .stExpander { background-color: #2d3748; color: white; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -164,21 +158,6 @@ if page == "Dashboard":
     st.title("📈 Real-Time Trading Dashboard")
     selected_symbol = st.selectbox("📊 Select Symbol", ['AAPL', 'MSFT', 'GOOG', 'AMZN', 'META', 'TSLA', 'NVDA', 'BA', 'DIS', 'NFLX'])
     
-    def fetch_data(ticker):
-        try:
-            bars = api.get_bars(ticker, tradeapi.TimeFrame.Minute, limit=30).df
-            bars.index = pd.to_datetime(bars.index)
-            return bars[['open', 'high', 'low', 'close', 'volume']]
-        except Exception as e:
-            st.error(f"Data Fetch Error for {ticker}: {e}")
-            return None
-    
-    def create_candlestick_chart(data, symbol):
-        fig = go.Figure(data=[go.Candlestick(x=data.index,
-                    open=data['open'], high=data['high'], low=data['low'], close=data['close'])])
-        fig.update_layout(title=f'{symbol} Price Chart', yaxis_title='Price', template='plotly_dark', height=500)
-        return fig
-    
     data = fetch_data(selected_symbol)
     if data is not None:
         st.plotly_chart(create_candlestick_chart(data, selected_symbol), use_container_width=True)
@@ -186,9 +165,9 @@ if page == "Dashboard":
 # Live Trading Page
 elif page == "Live Trading":
     st.title("🚀 Live Trading Panel")
-    trading_enabled = st.toggle("Enable Trading", value=True)
+    trading_enabled = st.checkbox("Enable Trading", value=True)
     risk_percentage = st.slider("Risk Per Trade (%)", 0.1, 5.0, 2.0)
-    
+
     def moving_average_crossover(symbol):
         bars = api.get_bars(symbol, tradeapi.TimeFrame.Minute, limit=50).df
         bars['SMA_10'] = bars['close'].rolling(window=10).mean()
@@ -208,30 +187,13 @@ elif page == "Live Trading":
 # Portfolio Page
 elif page == "Portfolio":
     st.title("💰 Portfolio Overview")
-    def get_portfolio():
-        account = api.get_account()
-        positions = api.list_positions()
-        portfolio = {
-            "cash": float(account.cash),
-            "equity": float(account.equity),
-            "profit_loss": float(account.equity) - float(account.last_equity),
-            "positions": []
-        }
-        for position in positions:
-            portfolio["positions"].append({
-                "symbol": position.symbol,
-                "qty": int(position.qty),
-                "avg_entry_price": float(position.avg_entry_price),
-                "current_price": float(position.current_price),
-                "unrealized_pl": float(position.unrealized_pl)
-            })
-        return portfolio
     
     portfolio = get_portfolio()
     st.write(f"**Buying Power:** ${portfolio['cash']:.2f}")
     st.write(f"**Portfolio Value:** ${portfolio['equity']:.2f}")
     if portfolio["positions"]:
-        st.table(portfolio["positions"])
+        portfolio_df = pd.DataFrame(portfolio["positions"])
+        st.table(portfolio_df)
     else:
         st.write("No open positions.")
 
