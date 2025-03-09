@@ -142,3 +142,100 @@ portfolio = get_portfolio()
 st.subheader("Account Summary")
 st.write(f"Buying Power: ${portfolio['cash']:.2f}")
 st.write(f"Portfolio Value: ${portfolio['equity']:.2f}")
+
+
+# Custom Styling
+st.markdown("""
+    <style>
+    body { background-color: #0e1117; color: white; font-family: 'Arial', sans-serif; }
+    .stSidebar { background-color: #161b22; }
+    .css-1d391kg { padding: 20px; }
+    .stButton>button { background-color: #238636; color: white; font-weight: bold; }
+    .stTabs { font-size: 16px; }
+    </style>
+    """, unsafe_allow_html=True)
+
+# Navigation
+st.sidebar.title("📌 Navigation")
+page = st.sidebar.radio("Go to", ["Dashboard", "Live Trading", "Portfolio", "Settings"])
+
+# Dashboard Page
+if page == "Dashboard":
+    st.title("📈 Real-Time Trading Dashboard")
+    selected_symbol = st.selectbox("📊 Select Symbol", ['AAPL', 'MSFT', 'GOOG', 'AMZN', 'META', 'TSLA', 'NVDA', 'BA', 'DIS', 'NFLX'])
+    
+    def fetch_data(ticker):
+        try:
+            bars = api.get_bars(ticker, tradeapi.TimeFrame.Minute, limit=30).df
+            bars.index = pd.to_datetime(bars.index)
+            return bars[['open', 'high', 'low', 'close', 'volume']]
+        except Exception as e:
+            st.error(f"Data Fetch Error for {ticker}: {e}")
+            return None
+    
+    def create_candlestick_chart(data, symbol):
+        fig = go.Figure(data=[go.Candlestick(x=data.index,
+                    open=data['open'], high=data['high'], low=data['low'], close=data['close'])])
+        fig.update_layout(title=f'{symbol} Price Chart', yaxis_title='Price', template='plotly_dark', height=500)
+        return fig
+    
+    data = fetch_data(selected_symbol)
+    if data is not None:
+        st.plotly_chart(create_candlestick_chart(data, selected_symbol), use_container_width=True)
+
+# Live Trading Page
+elif page == "Live Trading":
+    st.title("🚀 Live Trading Panel")
+    trading_enabled = st.toggle("Enable Trading", value=True)
+    risk_percentage = st.slider("Risk Per Trade (%)", 0.1, 5.0, 2.0)
+    
+    def moving_average_crossover(symbol):
+        bars = api.get_bars(symbol, tradeapi.TimeFrame.Minute, limit=50).df
+        bars['SMA_10'] = bars['close'].rolling(window=10).mean()
+        bars['SMA_30'] = bars['close'].rolling(window=30).mean()
+        
+        if bars['SMA_10'].iloc[-1] > bars['SMA_30'].iloc[-1]:
+            api.submit_order(symbol=symbol, qty=1, side='buy', type='market', time_in_force='gtc')
+            st.success(f"Bought {symbol}")
+        elif bars['SMA_10'].iloc[-1] < bars['SMA_30'].iloc[-1]:
+            api.submit_order(symbol=symbol, qty=1, side='sell', type='market', time_in_force='gtc')
+            st.warning(f"Sold {symbol}")
+    
+    if trading_enabled and st.button("Start Trading"):
+        st.success("Trading started!")
+        moving_average_crossover(selected_symbol)
+
+# Portfolio Page
+elif page == "Portfolio":
+    st.title("💰 Portfolio Overview")
+    def get_portfolio():
+        account = api.get_account()
+        positions = api.list_positions()
+        portfolio = {
+            "cash": float(account.cash),
+            "equity": float(account.equity),
+            "profit_loss": float(account.equity) - float(account.last_equity),
+            "positions": []
+        }
+        for position in positions:
+            portfolio["positions"].append({
+                "symbol": position.symbol,
+                "qty": int(position.qty),
+                "avg_entry_price": float(position.avg_entry_price),
+                "current_price": float(position.current_price),
+                "unrealized_pl": float(position.unrealized_pl)
+            })
+        return portfolio
+    
+    portfolio = get_portfolio()
+    st.write(f"**Buying Power:** ${portfolio['cash']:.2f}")
+    st.write(f"**Portfolio Value:** ${portfolio['equity']:.2f}")
+    if portfolio["positions"]:
+        st.table(portfolio["positions"])
+    else:
+        st.write("No open positions.")
+
+# Settings Page
+elif page == "Settings":
+    st.title("⚙️ Settings & Configuration")
+    st.write("Manage API keys, strategy parameters, and app preferences here.")
