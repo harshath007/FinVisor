@@ -7,8 +7,8 @@ import pandas as pd
 import streamlit as st
 
 # Alpaca API Credentials
-API_KEY = 'your_api_key_here'
-API_SECRET = 'your_api_secret_here'
+API_KEY = 'PKU5UOUPLT3W3V1HJG59'
+API_SECRET = 'EghcfIHcnkdTtNpLO11VvvBehq5iXKmJk4uPeXp0'
 BASE_URL = 'https://paper-api.alpaca.markets'  # Use live API URL in production
 
 # Connect to Alpaca API
