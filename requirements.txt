@@ -1,3 +1,4 @@
+plotly
 alpaca-trade-api
 backtrader
 pandas
