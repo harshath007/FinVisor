@@ -1,9 +1,10 @@
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 import pytz
 import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
+import requests
 import alpaca_trade_api as tradeapi
 import backtrader as bt
 
@@ -15,14 +16,22 @@ BASE_URL = 'https://paper-api.alpaca.markets'
 # Connect to Alpaca API
 api = tradeapi.REST(API_KEY, API_SECRET, BASE_URL, api_version='v2')
 
-# Timezone for Market Hours
 eastern = pytz.timezone('US/Eastern')
 
-# Streamlit Setup
 st.set_page_config(page_title="Trading Dashboard", page_icon="📈", layout="wide")
 st.title("📈 Automated Trading Dashboard")
 
-# Trading Strategy Class
+# Define market open and close times
+MARKET_OPEN = 9
+MARKET_CLOSE = 16
+
+def is_market_open():
+    current_time = datetime.now(eastern).time()
+    market_open_time = datetime.now(eastern).replace(hour=MARKET_OPEN, minute=30, second=0, microsecond=0).time()
+    market_close_time = datetime.now(eastern).replace(hour=MARKET_CLOSE, minute=0, second=0, microsecond=0).time()
+    return market_open_time <= current_time <= market_close_time
+
+# Trading strategy class for buying stocks in an upward trend
 class MonthlyProfitOptimizationStrategy(bt.Strategy):
     params = dict(
         rsi_period=14,
@@ -53,151 +62,73 @@ class MonthlyProfitOptimizationStrategy(bt.Strategy):
                 price = self.data.close[0]
                 max_shares = int(available_cash / price)
                 self.buy(size=max_shares)
-                self.highest_price = price
-                self.entry_price = price
-                self.stop_loss = price * self.params.stop_loss_factor
+                self.highest_price = self.data.close[0]
+                self.entry_price = self.data.close[0]
+                self.stop_loss = self.data.close[0] * self.params.stop_loss_factor
         else:
             self.highest_price = max(self.highest_price, self.data.close[0])
             trailing_stop = self.highest_price * (1 - self.params.trailing_stop_factor)
             if self.data.close[0] < trailing_stop or self.data.close[0] < self.stop_loss:
                 self.close()
 
-# Fetch Live Data
-def fetch_data(ticker):
+# Fetch Market Data
+def get_market_data():
+    url = "https://api.coingecko.com/api/v3/simple/price?ids=dow-jones-industrial-average,s&p-500,nasdaq-100&vs_currencies=usd&include_market_cap=true&include_24hr_change=true"
     try:
-        bars = api.get_bars(ticker, tradeapi.TimeFrame.Minute, limit=30).df
-        bars.index = pd.to_datetime(bars.index)
-        return bars[['open', 'high', 'low', 'close', 'volume']]
-    except Exception as e:
-        st.error(f"Data Fetch Error for {ticker}: {e}")
+        response = requests.get(url).json()
+        return {
+            "DOW": response['dow-jones-industrial-average'],
+            "S&P 500": response['s&p-500'],
+            "NASDAQ": response['nasdaq-100']
+        }
+    except:
         return None
 
-# Portfolio Status
-def get_portfolio():
-    account = api.get_account()
-    positions = api.list_positions()
-    portfolio = {
-        "cash": float(account.cash),
-        "equity": float(account.equity),
-        "profit_loss": float(account.equity) - float(account.last_equity),
-        "positions": []
-    }
-    for position in positions:
-        portfolio["positions"].append({
-            "symbol": position.symbol,
-            "qty": int(position.qty),
-            "avg_entry_price": float(position.avg_entry_price),
-            "current_price": float(position.current_price),
-            "unrealized_pl": float(position.unrealized_pl)
-        })
-    return portfolio
+# Fetch Financial News
+def get_news():
+    url = "https://newsapi.org/v2/top-headlines?category=business&apiKey=YOUR_NEWS_API_KEY"
+    try:
+        response = requests.get(url).json()
+        articles = response.get("articles", [])[:5]
+        return [(article["title"], article["url"]) for article in articles]
+    except:
+        return []
 
-# Candlestick Chart
-def create_candlestick_chart(data, symbol):
-    fig = go.Figure(data=[go.Candlestick(x=data.index,
-                open=data['open'], high=data['high'], low=data['low'], close=data['close'])])
-    fig.update_layout(title=f'{symbol} Price Chart', yaxis_title='Price', template='plotly_dark', height=500)
-    return fig
-
-# Run Live Trading
-def run_live_trading(stock_list):
-    cerebro = bt.Cerebro()
-    cerebro.addstrategy(MonthlyProfitOptimizationStrategy)
-    while True:
-        if api.get_clock().is_open:
-            for stock in stock_list:
-                stock_data = fetch_data(stock)
-                if stock_data is not None:
-                    data_feed = bt.feeds.PandasData(dataname=stock_data)
-                    cerebro.adddata(data_feed)
-                    cerebro.run()
-            portfolio = get_portfolio()
-            st.subheader("📊 Portfolio Summary")
-            st.write(f"**Cash:** ${portfolio['cash']:.2f}")
-            st.write(f"**Equity:** ${portfolio['equity']:.2f}")
-            st.write(f"**Profit/Loss:** ${portfolio['profit_loss']:.2f}")
-            st.subheader("🛍️ Open Positions")
-            if portfolio["positions"]:
-                st.dataframe(pd.DataFrame(portfolio["positions"]))
-            else:
-                st.write("No open positions.")
-            time.sleep(15 * 60)
-        else:
-            st.write("Market Closed. Waiting...")
-            time.sleep(60 * 60)
-
-# Sidebar and UI Setup
+# UI Layout
 st.sidebar.header("⚙️ Trading Controls")
-trading_enabled = st.sidebar.checkbox("Enable Trading", value=True)
-risk_percentage = st.sidebar.slider("Risk Per Trade (%)", 0.1, 5.0, 2.0)
+selected_symbol = st.sidebar.selectbox("Select Symbol", ['AAPL', 'MSFT', 'GOOG', 'AMZN', 'META', 'TSLA', 'NVDA', 'BA', 'DIS', 'NFLX'])
 
-st.sidebar.header("📈 Select Stock")
-selected_symbol = st.sidebar.selectbox("Select Symbol", 
-                                       ['AAPL', 'MSFT', 'GOOG', 'AMZN', 'META', 'TSLA', 'NVDA', 'BA', 'DIS', 'NFLX'])
-
-if st.sidebar.button("Start Trading"):
-    run_live_trading([selected_symbol])
-
-# Custom Styling
-st.markdown("""
-    <style>
-    body { background-color: #0e1117; color: white; font-family: 'Arial', sans-serif; }
-    .stSidebar { background-color: #161b22; }
-    .stButton>button { background-color: #238636; color: white; font-weight: bold; }
-    .stTabs { font-size: 16px; }
-    .stExpander { background-color: #2d3748; color: white; }
-    </style>
-    """, unsafe_allow_html=True)
-
-# Navigation
-st.sidebar.title("📌 Navigation")
+st.sidebar.header("📌 Navigation")
 page = st.sidebar.radio("Go to", ["Dashboard", "Live Trading", "Portfolio", "Settings"])
 
-# Dashboard Page
 if page == "Dashboard":
-    st.title("📈 Real-Time Trading Dashboard")
-    selected_symbol = st.selectbox("📊 Select Symbol", ['AAPL', 'MSFT', 'GOOG', 'AMZN', 'META', 'TSLA', 'NVDA', 'BA', 'DIS', 'NFLX'])
+    st.subheader("📊 Market Overview")
+    market_data = get_market_data()
+    if market_data:
+        col1, col2, col3 = st.columns(3)
+        col1.metric("DOW", f"{market_data['DOW']['usd']}", f"{market_data['DOW']['usd_24h_change']:.2f}%")
+        col2.metric("S&P 500", f"{market_data['S&P 500']['usd']}", f"{market_data['S&P 500']['usd_24h_change']:.2f}%")
+        col3.metric("NASDAQ", f"{market_data['NASDAQ']['usd']}", f"{market_data['NASDAQ']['usd_24h_change']:.2f}%")
     
-    data = fetch_data(selected_symbol)
-    if data is not None:
-        st.plotly_chart(create_candlestick_chart(data, selected_symbol), use_container_width=True)
-
-# Live Trading Page
-elif page == "Live Trading":
-    st.title("🚀 Live Trading Panel")
-    trading_enabled = st.checkbox("Enable Trading", value=True)
-    risk_percentage = st.slider("Risk Per Trade (%)", 0.1, 5.0, 2.0)
-
-    def moving_average_crossover(symbol):
-        bars = api.get_bars(symbol, tradeapi.TimeFrame.Minute, limit=50).df
-        bars['SMA_10'] = bars['close'].rolling(window=10).mean()
-        bars['SMA_30'] = bars['close'].rolling(window=30).mean()
-        
-        if bars['SMA_10'].iloc[-1] > bars['SMA_30'].iloc[-1]:
-            api.submit_order(symbol=symbol, qty=1, side='buy', type='market', time_in_force='gtc')
-            st.success(f"Bought {symbol}")
-        elif bars['SMA_10'].iloc[-1] < bars['SMA_30'].iloc[-1]:
-            api.submit_order(symbol=symbol, qty=1, side='sell', type='market', time_in_force='gtc')
-            st.warning(f"Sold {symbol}")
+    st.subheader("📰 Market News")
+    news = get_news()
+    for title, url in news:
+        st.markdown(f"[🔗 {title}]({url})")
     
-    if trading_enabled and st.button("Start Trading"):
-        st.success("Trading started!")
-        moving_average_crossover(selected_symbol)
+    st.subheader("📈 Real-Time Stock Data")
+    data = api.get_barset(selected_symbol, 'minute', limit=30)[selected_symbol]
+    if data:
+        df = pd.DataFrame([{ 'Time': bar.t, 'Close': bar.c } for bar in data])
+        fig = go.Figure(data=[go.Candlestick(x=df['Time'], open=df['Close'], high=df['Close'], low=df['Close'], close=df['Close'])])
+        fig.update_layout(template='plotly_dark')
+        st.plotly_chart(fig)
 
-# Portfolio Page
 elif page == "Portfolio":
-    st.title("💰 Portfolio Overview")
-    
-    portfolio = get_portfolio()
-    st.write(f"**Buying Power:** ${portfolio['cash']:.2f}")
-    st.write(f"**Portfolio Value:** ${portfolio['equity']:.2f}")
-    if portfolio["positions"]:
-        portfolio_df = pd.DataFrame(portfolio["positions"])
-        st.table(portfolio_df)
-    else:
-        st.write("No open positions.")
+    st.subheader("💰 Portfolio Overview")
+    account = api.get_account()
+    st.write(f"**Buying Power:** ${float(account.cash):.2f}")
+    st.write(f"**Portfolio Value:** ${float(account.equity):.2f}")
 
-# Settings Page
 elif page == "Settings":
-    st.title("⚙️ Settings & Configuration")
-    st.write("Manage API keys, strategy parameters, and app preferences here.")
+    st.subheader("⚙️ Settings")
+    st.write("Configure API keys and preferences here.")
